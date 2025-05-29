@@ -33,6 +33,9 @@ import * as mammoth from 'mammoth';
 // import { getOptimizedConfig, validateConfig, getDeviceRecommendations } from './src/gemma-config.js';
 
 import { escapeHtml } from './src/utils/escapeHtml';
+import { callGeminiForPolishing, callGeminiForInsights } from './src/APIService';
+import * as ChartManager from './src/ChartManager';
+import { ToastOptions } from './src/types';
 
 Chart.register(
   LineController,
@@ -49,8 +52,6 @@ Chart.register(
   Title // Register Title
 );
 
-const MODEL_NAME = 'gemini-2.5-flash-preview-04-17';
-
 interface Note {
   id: string;
   rawTranscription: string;
@@ -62,10 +63,6 @@ interface Note {
 interface ToastOptions {
   type: 'success' | 'error' | 'warning' | 'info';
   title: string;
-  message: string;
-  duration?: number;
-  showRetry?: boolean;
-  onRetry?: () => void;
 }
 
 interface ErrorContext {
@@ -508,8 +505,7 @@ class VoiceNotesApp {
   private waveformDrawingId: number | null = null;
   private timerIntervalId: number | null = null;
   private recordingStartTime: number = 0;
-  private activeAiChartInstances: Chart[] = []; // Store multiple chart instances
-  private chartIdCounter = 0; // Counter for unique chart IDs
+  // activeAiChartInstances and chartIdCounter are now managed in ChartManager.ts
 
   // Storage and export functionality properties
   private noteHistory: StoredNote[] = [];
@@ -1291,7 +1287,7 @@ class VoiceNotesApp {
           console.log('🧪 Test chart button clicked');
           
           // Always test direct Chart.js first
-          this.testChartWithoutAI();
+          ChartManager.testChartWithoutAI(this.aiChartDisplayArea, (opts: ToastOptions) => this.showToast(opts));
           
           // Then test with AI after a delay (only if AI service is available)
           if (this.genAI) {
@@ -1387,7 +1383,7 @@ class VoiceNotesApp {
       if (sampleChartsButton) {
         sampleChartsButton.addEventListener('click', () => {
           console.log('📊 Sample charts button clicked');
-          this.generateSampleCharts();
+          ChartManager.generateSampleCharts(this.aiChartDisplayArea, (opts: ToastOptions) => this.showToast(opts));
         });
       }
 
@@ -1527,7 +1523,7 @@ class VoiceNotesApp {
     this.editorTitle.textContent = 'New Note';
     
     // Clear charts
-    this.clearActiveCharts();
+    ChartManager.clearActiveCharts(this.aiChartDisplayArea, (opts: ToastOptions) => this.showToast(opts)); 
     
     // Reset analytics
     this.resetCurrentSession();
@@ -1799,6 +1795,99 @@ class VoiceNotesApp {
   }
 
   // Setup speech recognition API
+  private handleSpeechStart(): void {
+    console.log('🎤 Speech recognition started');
+    this.recordingStatus.textContent = 'Listening...';
+  }
+
+  private handleSpeechResult(event: any): void {
+    console.log('📝 Speech recognition result received:', event);
+    
+    let interimTranscript = '';
+    let finalTranscript = '';
+    let confidence = 0;
+    
+    for (let i = event.resultIndex; i < event.results.length; i++) {
+      const result = event.results[i];
+      const transcript = result[0].transcript;
+      const resultConfidence = result[0].confidence || 0.9; // Default confidence if not provided
+      
+      console.log(`Result ${i}:`, {
+        transcript,
+        confidence: resultConfidence,
+        isFinal: result.isFinal
+      });
+      
+      if (result.isFinal) {
+        finalTranscript += transcript;
+        console.log('✅ Final transcript chunk:', transcript);
+      } else {
+        interimTranscript += transcript;
+        console.log('⏳ Interim transcript chunk:', transcript);
+      }
+      
+      confidence = Math.max(confidence, resultConfidence);
+    }
+    
+    // Update confidence indicator
+    this.updateConfidenceIndicator(confidence * 100);
+    
+    // Update transcription display
+    this.updateTranscriptionDisplay(interimTranscript, finalTranscript);
+    
+    if (finalTranscript.trim()) {
+      this.finalTranscript += finalTranscript + ' ';
+      this.processNewTranscription(finalTranscript);
+      console.log('📋 Updated final transcript:', this.finalTranscript);
+    }
+  }
+
+  private handleSpeechError(event: any): void {
+    console.error('❌ Speech recognition error:', event.error, event);
+    
+    if (event.error === 'not-allowed') {
+      this.showPermissionOverlay();
+      this.recordingStatus.textContent = 'Microphone access denied';
+    } else if (event.error === 'no-speech') {
+      console.log('No speech detected, continuing...');
+      this.recordingStatus.textContent = 'No speech detected - keep talking...';
+    } else if (event.error === 'network') {
+      this.recordingStatus.textContent = 'Network error - transcription may be limited';
+      this.showToast({
+        type: 'warning',
+        title: 'Network Issue',
+        message: 'Transcription quality may be affected by network connectivity',
+        duration: 5000
+      });
+    } else {
+      this.recordingStatus.textContent = 'Speech recognition error';
+      this.handleError({
+        operation: 'speechRecognition',
+        details: event.error,
+        userMessage: 'Speech recognition error occurred',
+        retryable: true,
+        retryAction: () => this.restartSpeechRecognition()
+      });
+    }
+  }
+
+  private handleSpeechEnd(): void {
+    console.log('🔚 Speech recognition ended');
+    if (this.isRecording) {
+      console.log('🔄 Restarting speech recognition...');
+      // Small delay before restarting to prevent rapid restart loops
+      setTimeout(() => {
+        if (this.isRecording && this.speechRecognition) {
+          try {
+            this.speechRecognition.start();
+          } catch (error) {
+            console.error('Failed to restart speech recognition:', error);
+          }
+        }
+      }, 100);
+    }
+  }
+
   private setupSpeechRecognition(): void {
     console.log('Setting up speech recognition...');
     
@@ -1830,98 +1919,10 @@ class VoiceNotesApp {
       });
       
       // Set up event handlers
-      this.speechRecognition.onstart = () => {
-        console.log('🎤 Speech recognition started');
-        this.recordingStatus.textContent = 'Listening...';
-      };
-      
-      this.speechRecognition.onresult = (event: any) => {
-        console.log('📝 Speech recognition result received:', event);
-        
-        let interimTranscript = '';
-        let finalTranscript = '';
-        let confidence = 0;
-        
-        for (let i = event.resultIndex; i < event.results.length; i++) {
-          const result = event.results[i];
-          const transcript = result[0].transcript;
-          const resultConfidence = result[0].confidence || 0.9; // Default confidence if not provided
-          
-          console.log(`Result ${i}:`, {
-            transcript,
-            confidence: resultConfidence,
-            isFinal: result.isFinal
-          });
-          
-          if (result.isFinal) {
-            finalTranscript += transcript;
-            console.log('✅ Final transcript chunk:', transcript);
-          } else {
-            interimTranscript += transcript;
-            console.log('⏳ Interim transcript chunk:', transcript);
-          }
-          
-          confidence = Math.max(confidence, resultConfidence);
-        }
-        
-        // Update confidence indicator
-        this.updateConfidenceIndicator(confidence * 100);
-        
-        // Update transcription display
-        this.updateTranscriptionDisplay(interimTranscript, finalTranscript);
-        
-        if (finalTranscript.trim()) {
-          this.finalTranscript += finalTranscript + ' ';
-          this.processNewTranscription(finalTranscript);
-          console.log('📋 Updated final transcript:', this.finalTranscript);
-        }
-      };
-      
-      this.speechRecognition.onerror = (event: any) => {
-        console.error('❌ Speech recognition error:', event.error, event);
-        
-        if (event.error === 'not-allowed') {
-          this.showPermissionOverlay();
-          this.recordingStatus.textContent = 'Microphone access denied';
-        } else if (event.error === 'no-speech') {
-          console.log('No speech detected, continuing...');
-          this.recordingStatus.textContent = 'No speech detected - keep talking...';
-        } else if (event.error === 'network') {
-          this.recordingStatus.textContent = 'Network error - transcription may be limited';
-          this.showToast({
-            type: 'warning',
-            title: 'Network Issue',
-            message: 'Transcription quality may be affected by network connectivity',
-            duration: 5000
-          });
-        } else {
-          this.recordingStatus.textContent = 'Speech recognition error';
-          this.handleError({
-            operation: 'speechRecognition',
-            details: event.error,
-            userMessage: 'Speech recognition error occurred',
-            retryable: true,
-            retryAction: () => this.restartSpeechRecognition()
-          });
-        }
-      };
-      
-      this.speechRecognition.onend = () => {
-        console.log('🔚 Speech recognition ended');
-        if (this.isRecording) {
-          console.log('🔄 Restarting speech recognition...');
-          // Small delay before restarting to prevent rapid restart loops
-          setTimeout(() => {
-            if (this.isRecording && this.speechRecognition) {
-              try {
-                this.speechRecognition.start();
-              } catch (error) {
-                console.error('Failed to restart speech recognition:', error);
-              }
-            }
-          }, 100);
-        }
-      };
+      this.speechRecognition.onstart = () => this.handleSpeechStart();
+      this.speechRecognition.onresult = (event: any) => this.handleSpeechResult(event);
+      this.speechRecognition.onerror = (event: any) => this.handleSpeechError(event);
+      this.speechRecognition.onend = () => this.handleSpeechEnd();
       
       console.log('✅ Speech recognition setup complete');
       
@@ -2473,7 +2474,7 @@ class VoiceNotesApp {
         });
         
         console.log('📞 Calling Gemini for polishing...');
-        const polishedResult = await this.callGeminiForPolishing(this.finalTranscript);
+        const polishedResult = await callGeminiForPolishing(this.genAI, this.finalTranscript);
         console.log('📞 Gemini polishing response:', polishedResult);
         
         if (polishedResult) {
@@ -2489,7 +2490,7 @@ class VoiceNotesApp {
             console.log('🔍 AI Chart Display Area element:', this.aiChartDisplayArea);
             console.log('🔍 AI Chart Display Area innerHTML before:', this.aiChartDisplayArea?.innerHTML);
             
-            await this.generateChartsFromAI(polishedResult.chartSuggestion);
+            await ChartManager.generateChartsFromAI(this.aiChartDisplayArea, (opts: ToastOptions) => this.showToast(opts), polishedResult.chartSuggestion);
             
             console.log('🔍 AI Chart Display Area innerHTML after:', this.aiChartDisplayArea?.innerHTML);
           } else {
@@ -2548,7 +2549,7 @@ class VoiceNotesApp {
     console.log('🧪 Test chart suggestion (Manual):', testChartSuggestion);
     
     try {
-      await this.generateChartsFromAI(testChartSuggestion);
+      await ChartManager.generateChartsFromAI(this.aiChartDisplayArea, (opts: ToastOptions) => this.showToast(opts), testChartSuggestion);
       
       this.showToast({
         type: 'success',
@@ -2566,182 +2567,9 @@ class VoiceNotesApp {
   }
 
   // Simple test for Chart.js without AI service
-  public async testChartWithoutAI(): Promise<void> {
-    console.log('🧪 Testing Chart.js directly without AI...');
-    
-    if (!this.aiChartDisplayArea) {
-      console.error('❌ Chart display area not found!');
-      return;
-    }
-    
-    // Clear existing content
-    this.aiChartDisplayArea.innerHTML = '';
-    
-    const chartId = `direct-chart-${this.chartIdCounter++}`;
-    const chartContainer = document.createElement('div');
-    chartContainer.className = 'chart-container';
-    chartContainer.innerHTML = `
-      <div class="chart-header">
-        <h4>Direct Chart Test</h4>
-        <p class="chart-description">Testing Chart.js directly without AI service</p>
-      </div>
-      <canvas id="${chartId}"></canvas>
-    `;
-    
-    this.aiChartDisplayArea.appendChild(chartContainer);
-    
-    // Use querySelector on the container to find the canvas directly
-    const canvas = chartContainer.querySelector(`#${chartId}`) as HTMLCanvasElement;
-    if (!canvas) {
-      console.error('❌ Canvas element not found!');
-      return;
-    }
-    
-    const ctx = canvas.getContext('2d');
-    if (!ctx) {
-      console.error('❌ Canvas context not available!');
-      return;
-    }
-    
-    try {
-      const chart = new Chart(ctx, {
-        type: 'bar',
-        data: {
-          labels: ['Red', 'Blue', 'Yellow', 'Green', 'Purple', 'Orange'],
-          datasets: [{
-            label: 'Sample Data',
-            data: [12, 19, 3, 5, 2, 3],
-            backgroundColor: [
-              'rgba(255, 99, 132, 0.2)',
-              'rgba(54, 162, 235, 0.2)',
-              'rgba(255, 205, 86, 0.2)',
-              'rgba(75, 192, 192, 0.2)',
-              'rgba(153, 102, 255, 0.2)',
-              'rgba(255, 159, 64, 0.2)'
-            ],
-            borderColor: [
-              'rgba(255, 99, 132, 1)',
-              'rgba(54, 162, 235, 1)',
-              'rgba(255, 205, 86, 1)',
-              'rgba(75, 192, 192, 1)',
-              'rgba(153, 102, 255, 1)',
-              'rgba(255, 159, 64, 1)'
-            ],
-            borderWidth: 1
-          }]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          scales: {
-            y: {
-              beginAtZero: true
-            }
-          }
-        }
-      });
-      
-      this.activeAiChartInstances.push(chart);
-      console.log('✅ Direct Chart.js test successful!');
-      
-      this.showToast({
-        type: 'success',
-        title: 'Chart Test Success',
-        message: 'Chart.js is working properly! Check the Raw tab.'
-      });
-      
-    } catch (error) {
-      console.error('❌ Direct Chart.js test failed:', error);
-      this.showToast({
-        type: 'error',
-        title: 'Chart Test Failed',
-        message: `Chart.js test failed: ${error.message}`
-      });
-    }
-  }
-
-  // Manual chart generation for testing charts with sample data
-  public async generateSampleCharts(): Promise<void> {
-    console.log('📊 Generating sample charts with predefined data...');
-    
-    if (!this.aiChartDisplayArea) {
-      console.error('❌ Chart display area not found!');
-      this.showToast({
-        type: 'error',
-        title: 'Chart Error',
-        message: 'Chart display area not found. Switch to Raw tab.'
-      });
-      return;
-    }
-    
-    // Clear existing charts
-    this.clearActiveCharts();
-    
-    // Sample data for different chart types
-    const sampleCharts = [
-      {
-        type: 'bar',
-        title: 'Quarterly Sales Performance',
-        description: 'Sample sales data showing quarterly performance',
-        data: {
-          labels: ['Q1 2024', 'Q2 2024', 'Q3 2024', 'Q4 2024'],
-          datasets: [{
-            label: 'Sales ($K)',
-            data: [120, 190, 300, 500],
-            backgroundColor: ['#ff6384', '#36a2eb', '#ffce56', '#4bc0c0'],
-            borderColor: ['#ff6384', '#36a2eb', '#ffce56', '#4bc0c0'],
-            borderWidth: 1
-          }]
-        }
-      },
-      {
-        type: 'pie',
-        title: 'Market Share Distribution',
-        description: 'Sample market share breakdown by category',
-        data: {
-          labels: ['Product A', 'Product B', 'Product C', 'Product D'],
-          datasets: [{
-            label: 'Market Share (%)',
-            data: [35, 25, 20, 20],
-            backgroundColor: ['#ff9999', '#66b3ff', '#99ff99', '#ffcc99'],
-            borderWidth: 2
-          }]
-        }
-      },
-      {
-        type: 'line',
-        title: 'Growth Trend Analysis',
-        description: 'Sample growth trend over time',
-        data: {
-          labels: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'],
-          datasets: [{
-            label: 'Growth Rate (%)',
-            data: [5, 8, 12, 15, 18, 22],
-            borderColor: '#36a2eb',
-            backgroundColor: 'rgba(54, 162, 235, 0.1)',
-            fill: true,
-            tension: 0.4
-          }]
-        }
-      }
-    ];
-    
-    // Generate each sample chart
-    for (const chartData of sampleCharts) {
-      try {
-        await this.generateChartsFromAI(chartData);
-        console.log(`✅ Generated ${chartData.type} chart: ${chartData.title}`);
-      } catch (error) {
-        console.error(`❌ Failed to generate ${chartData.type} chart:`, error);
-      }
-    }
-    
-    this.showToast({
-      type: 'success',
-      title: 'Sample Charts Generated',
-      message: `Generated ${sampleCharts.length} sample charts successfully!`
-    });
-  }
+  // Chart-related methods (testChartWithoutAI, generateSampleCharts, generateChartsFromAI, 
+  // createTopicChart, createSentimentChart, createWordFrequencyChart, clearActiveCharts, generateChartColors)
+  // have been moved to src/ChartManager.ts
 
   private fallbackToBasicPolishing(): void {
     if (!this.polishedNote || !this.finalTranscript) return;
@@ -2775,7 +2603,7 @@ class VoiceNotesApp {
       });
       
       console.log('📞 Calling Gemini for insights...');
-      const insights = await this.callGeminiForInsights(this.finalTranscript);
+      const insights = await callGeminiForInsights(this.genAI, this.finalTranscript);
       console.log('📞 Gemini insights response:', insights);
       
       if (insights) {
@@ -2785,7 +2613,17 @@ class VoiceNotesApp {
         
         // Generate charts based on insights
         console.log('📊 Generating charts from insights...');
-        await this.generateChartsFromInsights(insights);
+        // This method itself was removed as its logic is now split:
+        // API call is direct, chart creations are from ChartManager
+        if (insights.chartData?.topics) {
+          await ChartManager.createTopicChart(this.aiChartDisplayArea, insights.chartData.topics);
+        }
+        if (insights.chartData?.sentiment_breakdown) {
+          await ChartManager.createSentimentChart(this.aiChartDisplayArea, insights.chartData.sentiment_breakdown);
+        }
+        if (insights.chartData?.word_frequency) {
+          await ChartManager.createWordFrequencyChart(this.aiChartDisplayArea, insights.chartData.word_frequency);
+        }
         
         this.showToast({
           type: 'success',
@@ -3619,7 +3457,7 @@ class VoiceNotesApp {
     }
     
     // Clear all chart instances
-    this.clearActiveCharts();
+    ChartManager.clearActiveCharts(this.aiChartDisplayArea, (opts: ToastOptions) => this.showToast(opts));
     
     console.log('✅ Cleanup completed - Intervals cleared and charts destroyed.');
   }
