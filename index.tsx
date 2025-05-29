@@ -32,6 +32,8 @@ import * as mammoth from 'mammoth';
 // import { EnhancedVoiceNotesApp } from './src/enhanced-voice-app.js';
 // import { getOptimizedConfig, validateConfig, getDeviceRecommendations } from './src/gemma-config.js';
 
+import { escapeHtml } from './src/utils/escapeHtml';
+
 Chart.register(
   LineController,
   LineElement,
@@ -834,22 +836,18 @@ class VoiceNotesApp {
       // Only run performance optimization, not testing functions
       if (this.performanceOptimizationInterval) {
         clearInterval(this.performanceOptimizationInterval);
+        this.performanceOptimizationInterval = null; // Explicitly nullify
       }
       this.performanceOptimizationInterval = setInterval(() => {
         this.optimizePriority3Performance();
         this.optimizePriority4Performance();
       }, 30000); // Optimize every 30 seconds
     }, 2000); // Wait 2 seconds for full initialization
-  }
 
-  private escapeHtml(unsafe: string): string {
-    if (unsafe === null || unsafe === undefined) return '';
-    return unsafe
-         .replace(/&/g, "&amp;")
-         .replace(/</g, "&lt;")
-         .replace(/>/g, "&gt;")
-         .replace(/"/g, "&quot;")
-         .replace(/'/g, "&#039;");
+    // Add beforeunload event listener for cleanup
+    window.addEventListener('beforeunload', () => {
+      this.cleanup();
+    });
   }
 
   // Enhanced Error Handling Methods
@@ -3603,7 +3601,7 @@ class VoiceNotesApp {
   }
 
   // Cleanup method to prevent memory leaks and stop intervals
-  private cleanup(): void {
+  public cleanup(): void {
     // Clear all intervals
     if (this.autoSaveIntervalId) {
       clearInterval(this.autoSaveIntervalId);
@@ -3623,7 +3621,7 @@ class VoiceNotesApp {
     // Clear all chart instances
     this.clearActiveCharts();
     
-    console.log('✅ Cleanup completed - all intervals cleared');
+    console.log('✅ Cleanup completed - Intervals cleared and charts destroyed.');
   }
 }
 
