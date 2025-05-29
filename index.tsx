@@ -2587,7 +2587,7 @@ class VoiceNotesApp {
         <h4>Direct Chart Test</h4>
         <p class="chart-description">Testing Chart.js directly without AI service</p>
       </div>
-      <canvas id="${chartId}" width="400" height="200"></canvas>
+      <canvas id="${chartId}"></canvas>
     `;
     
     this.aiChartDisplayArea.appendChild(chartContainer);
@@ -2968,7 +2968,7 @@ class VoiceNotesApp {
         <h4>${chartSuggestion.title || 'AI Generated Chart'}</h4>
         <p class="chart-description">${chartSuggestion.description || ''}</p>
       </div>
-      <canvas id="${chartId}" width="400" height="200"></canvas>
+  <canvas id="${chartId}"></canvas>
     `;
     console.log('🔍 Set chart container innerHTML');
     
@@ -3080,7 +3080,7 @@ class VoiceNotesApp {
         <h4>Topic Distribution</h4>
         <p class="chart-description">Main topics identified in your transcription</p>
       </div>
-      <canvas id="${chartId}" width="400" height="200"></canvas>
+      <canvas id="${chartId}"></canvas>
     `;
     
     this.aiChartDisplayArea.appendChild(chartContainer);
@@ -3136,7 +3136,7 @@ class VoiceNotesApp {
         <h4>Sentiment Analysis</h4>
         <p class="chart-description">Emotional tone breakdown of your content</p>
       </div>
-      <canvas id="${chartId}" width="400" height="200"></canvas>
+      <canvas id="${chartId}"></canvas>
     `;
     
     this.aiChartDisplayArea.appendChild(chartContainer);
@@ -3196,7 +3196,7 @@ class VoiceNotesApp {
         <h4>Key Words</h4>
         <p class="chart-description">Most frequently used words in your transcription</p>
       </div>
-      <canvas id="${chartId}" width="400" height="200"></canvas>
+      <canvas id="${chartId}"></canvas>
     `;
     
     this.aiChartDisplayArea.appendChild(chartContainer);
