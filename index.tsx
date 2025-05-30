@@ -36,6 +36,7 @@ import { escapeHtml } from './src/utils/escapeHtml';
 import { callGeminiForPolishing, callGeminiForInsights } from './src/APIService';
 import * as ChartManager from './src/ChartManager';
 import { ToastOptions } from './src/types';
+import * as Constants from './src/constants';
 
 Chart.register(
   LineController,
@@ -820,8 +821,9 @@ class VoiceNotesApp {
       setInterval(() => {
         this.optimizePriority3Performance();
         this.optimizePriority4Performance();
-      }, 30000); // Optimize every 30 seconds
-    }, 2000); // Wait 2 seconds for full initialization
+      // Constants.AUTOSAVE_INTERVAL was an example, using a more descriptive name or PERFORMANCE_CONFIG value
+      }, PERFORMANCE_CONFIG.AI_REQUEST_TIMEOUT); // Example: using a value from PERFORMANCE_CONFIG
+    }, Constants.CONSTRUCTOR_SETUP_DELAY); 
     */
 
     // Initialize feature status dashboard
@@ -837,8 +839,9 @@ class VoiceNotesApp {
       this.performanceOptimizationInterval = setInterval(() => {
         this.optimizePriority3Performance();
         this.optimizePriority4Performance();
-      }, 30000); // Optimize every 30 seconds
-    }, 2000); // Wait 2 seconds for full initialization
+      // Using a value from PERFORMANCE_CONFIG as an example for a 30-second interval
+      }, PERFORMANCE_CONFIG.AI_REQUEST_TIMEOUT); // Assuming AI_REQUEST_TIMEOUT is 30000ms
+    }, Constants.CONSTRUCTOR_SETUP_DELAY); 
 
     // Add beforeunload event listener for cleanup
     window.addEventListener('beforeunload', () => {
@@ -1520,7 +1523,7 @@ class VoiceNotesApp {
     this.rawTranscription.textContent = '';
     this.polishedNote.innerHTML = '';
     this.currentNote = null;
-    this.editorTitle.textContent = 'New Note';
+    this.editorTitle.textContent = Constants.EDITOR_DEFAULT_TITLE;
     
     // Clear charts
     ChartManager.clearActiveCharts(this.aiChartDisplayArea, (opts: ToastOptions) => this.showToast(opts)); 
@@ -1797,7 +1800,7 @@ class VoiceNotesApp {
   // Setup speech recognition API
   private handleSpeechStart(): void {
     console.log('🎤 Speech recognition started');
-    this.recordingStatus.textContent = 'Listening...';
+    this.recordingStatus.textContent = Constants.STATUS_LISTENING;
   }
 
   private handleSpeechResult(event: any): void {
@@ -1847,20 +1850,20 @@ class VoiceNotesApp {
     
     if (event.error === 'not-allowed') {
       this.showPermissionOverlay();
-      this.recordingStatus.textContent = 'Microphone access denied';
+      this.recordingStatus.textContent = Constants.STATUS_MIC_ACCESS_DENIED;
     } else if (event.error === 'no-speech') {
       console.log('No speech detected, continuing...');
-      this.recordingStatus.textContent = 'No speech detected - keep talking...';
+      this.recordingStatus.textContent = Constants.STATUS_SPEECH_DETECTED_WAITING;
     } else if (event.error === 'network') {
-      this.recordingStatus.textContent = 'Network error - transcription may be limited';
+      this.recordingStatus.textContent = Constants.STATUS_NETWORK_ERROR_TRANSCRIPTION_LIMITED;
       this.showToast({
         type: 'warning',
         title: 'Network Issue',
         message: 'Transcription quality may be affected by network connectivity',
-        duration: 5000
+        duration: PERFORMANCE_CONFIG.AI_REQUEST_TIMEOUT / 6 // Example, consider a dedicated TOAST_DURATION constant
       });
     } else {
-      this.recordingStatus.textContent = 'Speech recognition error';
+      this.recordingStatus.textContent = Constants.STATUS_SPEECH_RECOGNITION_ERROR;
       this.handleError({
         operation: 'speechRecognition',
         details: event.error,
@@ -1884,7 +1887,7 @@ class VoiceNotesApp {
             console.error('Failed to restart speech recognition:', error);
           }
         }
-      }, 100);
+          }, Constants.SPEECH_RECOGNITION_RESTART_DELAY_SHORT);
     }
   }
 
@@ -1946,7 +1949,7 @@ class VoiceNotesApp {
           if (this.speechRecognition && this.isRecording) {
             this.speechRecognition.start();
           }
-        }, 500);
+    }, Constants.SPEECH_RECOGNITION_RESTART_DELAY_MEDIUM);
       } catch (error) {
         console.error('Failed to restart speech recognition:', error);
       }

@@ -4,6 +4,50 @@ import { ChartSuggestion, ToastOptions } from '../types';
 let chartIdCounter = 0;
 let activeAiChartInstances: Chart[] = [];
 
+// --- Private Helper Function ---
+function _createChartCanvasAndContext(
+  chartId: string,
+  title: string,
+  description: string,
+  aiChartDisplayArea: HTMLDivElement,
+  chartSpecificClass?: string // Optional class for the chart-container
+): { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D; chartContainer: HTMLDivElement } | null {
+  const chartContainer = document.createElement('div');
+  chartContainer.className = 'chart-container';
+  if (chartSpecificClass) {
+      chartContainer.classList.add(chartSpecificClass);
+  }
+
+  chartContainer.innerHTML = `
+    <div class="chart-header">
+      <h4>${title}</h4>
+      <p class="chart-description">${description}</p>
+    </div>
+    <canvas id="${chartId}"></canvas> 
+  `;
+
+  if (!aiChartDisplayArea || typeof aiChartDisplayArea.appendChild !== 'function') {
+      console.error('Error: aiChartDisplayArea is not a valid DOM element for appending child.', aiChartDisplayArea);
+      return null;
+  }
+  aiChartDisplayArea.appendChild(chartContainer);
+
+  const canvas = chartContainer.querySelector(`#${chartId}`) as HTMLCanvasElement;
+  if (!canvas) {
+      console.error(`Canvas element with id ${chartId} not found.`);
+      // chartContainer.remove(); // Clean up if canvas isn't found
+      return null;
+  }
+  
+  const ctx = canvas.getContext('2d');
+  if (!ctx) {
+      console.error(`Failed to get 2D context for canvas ${chartId}.`);
+      // chartContainer.remove(); // Clean up if context fails
+      return null;
+  }
+  return { canvas, ctx, chartContainer };
+}
+
 // --- Utility Functions ---
 export function generateChartColors(count: number): string[] {
   const colors = [
@@ -60,39 +104,24 @@ export async function generateChartsFromAI(
   console.log('📊 generateChartsFromAI() called with:', chartSuggestion);
   
   if (!chartSuggestion || !aiChartDisplayArea) {
-    console.log('⚠️ No chart suggestion or chart display area not found');
+    console.log('⚠️ No chart suggestion or chart display area not found for generateChartsFromAI');
+    showToast({ type: 'error', title: 'Chart Error', message: 'Chart display area or suggestion missing.' });
     return;
   }
-  
-  // It might be good practice to clear charts related to this specific display area if multiple areas are used in the future.
-  // For now, assuming aiChartDisplayArea is the primary one for these AI charts.
-  // clearActiveCharts(aiChartDisplayArea); // Decided against auto-clearing here, let caller manage.
 
   const chartId = `ai-chart-${chartIdCounter++}`;
-  const chartContainer = document.createElement('div');
-  chartContainer.className = 'chart-container';
-  
-  chartContainer.innerHTML = `
-    <div class="chart-header">
-      <h4>${chartSuggestion.title || 'AI Generated Chart'}</h4>
-      <p class="chart-description">${chartSuggestion.description || ''}</p>
-    </div>
-    <canvas id="${chartId}"></canvas>
-  `;
-  
-  aiChartDisplayArea.appendChild(chartContainer);
-  
-  const canvas = chartContainer.querySelector(`#${chartId}`) as HTMLCanvasElement;
-  if (!canvas) {
-    console.error('❌ Canvas element not found for AI chart:', chartId);
+  const setup = _createChartCanvasAndContext(
+    chartId,
+    chartSuggestion.title || Constants.CHART_DEFAULT_AI_TITLE,
+    chartSuggestion.description || '',
+    aiChartDisplayArea
+  );
+
+  if (!setup || !setup.ctx) {
+    showToast({ type: 'error', title: 'Chart Setup Error', message: 'Could not create chart canvas or context.' });
     return;
   }
-  
-  const ctx = canvas.getContext('2d');
-  if (!ctx) {
-    console.error('❌ Canvas context not available for AI chart');
-    return;
-  }
+  const { ctx } = setup;
   
   const chartConfig = {
     type: chartSuggestion.type || 'bar',
@@ -132,38 +161,35 @@ export async function testChartWithoutAI(
   showToast: (options: ToastOptions) => void
 ): Promise<void> {
   console.log('🧪 Testing Chart.js directly without AI...');
-  
+
   if (!aiChartDisplayArea) {
     console.error('❌ Chart display area not found for testChartWithoutAI!');
     showToast({ type: 'error', title: 'Test Error', message: 'Chart display area not found.' });
     return;
   }
   
-  clearActiveCharts(aiChartDisplayArea); // Clear before drawing a new one in this test
-  
+  // clearActiveCharts(aiChartDisplayArea, showToast); // Pass showToast if clearing should also show a toast
+  // For this specific test, let's assume clearing is silent or handled by the test itself if needed.
+  // If clearActiveCharts is called, ensure it has access to showToast if it's meant to use it.
+  // For now, let's assume the main purpose of testChartWithoutAI is to draw, not to manage prior state notifications.
+  // Consider if clearActiveCharts should ALWAYS take showToast or if it's optional.
+  // Based on current clearActiveCharts, it takes an optional showToast.
+  clearActiveCharts(aiChartDisplayArea, showToast);
+
+
   const chartId = `direct-chart-${chartIdCounter++}`;
-  const chartContainer = document.createElement('div');
-  chartContainer.className = 'chart-container';
-  chartContainer.innerHTML = `
-    <div class="chart-header">
-      <h4>Direct Chart Test</h4>
-      <p class="chart-description">Testing Chart.js directly without AI service</p>
-    </div>
-    <canvas id="${chartId}"></canvas>
-  `;
-  
-  aiChartDisplayArea.appendChild(chartContainer);
-  
-  const canvas = chartContainer.querySelector(`#${chartId}`) as HTMLCanvasElement;
-  if (!canvas) {
-    console.error('❌ Canvas element not found for direct test chart!');
+  const setup = _createChartCanvasAndContext(
+    chartId,
+    Constants.CHART_DEFAULT_DIRECT_TEST_TITLE,
+    Constants.CHART_DEFAULT_DIRECT_TEST_DESCRIPTION,
+    aiChartDisplayArea
+  );
+
+  if (!setup || !setup.ctx) {
+    showToast({ type: 'error', title: 'Chart Setup Error', message: 'Could not create test chart canvas or context.' });
     return;
   }
-  const ctx = canvas.getContext('2d');
-  if (!ctx) {
-    console.error('❌ Canvas context not available for direct test chart!');
-    return;
-  }
+  const { ctx } = setup;
   
   try {
     const chart = new Chart(ctx, {
@@ -203,29 +229,29 @@ export async function testChartWithoutAI(
 
 export async function createTopicChart(
   aiChartDisplayArea: HTMLDivElement,
-  topicsData: Record<string, number>
+  topicsData: Record<string, number>,
+  showToast?: (options: ToastOptions) => void // Making showToast optional for internally called charts
 ): Promise<void> {
   const chartId = `topics-chart-${chartIdCounter++}`;
-  const chartContainer = document.createElement('div');
-  chartContainer.className = 'chart-container';
-  chartContainer.innerHTML = `
-    <div class="chart-header">
-      <h4>Topic Distribution</h4>
-      <p class="chart-description">Main topics identified in your transcription</p>
-    </div>
-    <canvas id="${chartId}"></canvas>
-  `;
-  aiChartDisplayArea.appendChild(chartContainer);
-  const canvas = chartContainer.querySelector(`#${chartId}`) as HTMLCanvasElement;
-  if (!canvas) return;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) return;
+  const setup = _createChartCanvasAndContext(
+    chartId,
+    Constants.CHART_DEFAULT_TOPIC_DIST_TITLE,
+    Constants.CHART_DEFAULT_TOPIC_DIST_DESCRIPTION,
+    aiChartDisplayArea
+  );
+
+  if (!setup || !setup.ctx) {
+    if (showToast) showToast({ type: 'error', title: 'Chart Setup Error', message: 'Could not create topic chart canvas.' });
+    return;
+  }
+  const { ctx } = setup;
 
   const labels = Object.keys(topicsData);
   const data = Object.values(topicsData);
   const colors = generateChartColors(labels.length);
 
-  const chart = new Chart(ctx, {
+  try {
+    const chart = new Chart(ctx, {
     type: 'doughnut',
     data: {
       labels: labels,
@@ -246,30 +272,36 @@ export async function createTopicChart(
       }
     }
   });
-  activeAiChartInstances.push(chart);
+    activeAiChartInstances.push(chart);
+  } catch (error) {
+    console.error('Error creating Topic Chart:', error);
+    if (showToast) {
+        showToast({ type: 'error', title: 'Chart Error', message: 'Could not create topic distribution chart.' });
+    }
+  }
 }
 
 export async function createSentimentChart(
   aiChartDisplayArea: HTMLDivElement,
-  sentimentData: Record<string, number>
+  sentimentData: Record<string, number>,
+  showToast?: (options: ToastOptions) => void
 ): Promise<void> {
   const chartId = `sentiment-chart-${chartIdCounter++}`;
-  const chartContainer = document.createElement('div');
-  chartContainer.className = 'chart-container';
-  chartContainer.innerHTML = `
-    <div class="chart-header">
-      <h4>Sentiment Analysis</h4>
-      <p class="chart-description">Emotional tone breakdown of your content</p>
-    </div>
-    <canvas id="${chartId}"></canvas>
-  `;
-  aiChartDisplayArea.appendChild(chartContainer);
-  const canvas = chartContainer.querySelector(`#${chartId}`) as HTMLCanvasElement;
-  if (!canvas) return;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) return;
+  const setup = _createChartCanvasAndContext(
+    chartId,
+    Constants.CHART_DEFAULT_SENTIMENT_TITLE,
+    Constants.CHART_DEFAULT_SENTIMENT_DESCRIPTION,
+    aiChartDisplayArea
+  );
 
-  const chart = new Chart(ctx, {
+  if (!setup || !setup.ctx) {
+    if (showToast) showToast({ type: 'error', title: 'Chart Setup Error', message: 'Could not create sentiment chart canvas.' });
+    return;
+  }
+  const { ctx } = setup;
+
+  try {
+    const chart = new Chart(ctx, {
     type: 'bar',
     data: {
       labels: Object.keys(sentimentData),
@@ -291,34 +323,43 @@ export async function createSentimentChart(
       scales: { y: { beginAtZero: true } }
     }
   });
-  activeAiChartInstances.push(chart);
+    activeAiChartInstances.push(chart);
+  } catch (error) {
+    console.error('Error creating Sentiment Chart:', error);
+    if (showToast) {
+        showToast({ type: 'error', title: 'Chart Error', message: 'Could not create sentiment analysis chart.' });
+    }
+  }
 }
 
 export async function createWordFrequencyChart(
   aiChartDisplayArea: HTMLDivElement,
-  wordData: Record<string, number>
+  wordData: Record<string, number>,
+  showToast?: (options: ToastOptions) => void
 ): Promise<void> {
   const chartId = `words-chart-${chartIdCounter++}`;
-  const chartContainer = document.createElement('div');
-  chartContainer.className = 'chart-container';
-  chartContainer.innerHTML = `
-    <div class="chart-header">
-      <h4>Key Words</h4>
-      <p class="chart-description">Most frequently used words in your transcription</p>
-    </div>
-    <canvas id="${chartId}"></canvas>
-  `;
-  aiChartDisplayArea.appendChild(chartContainer);
-  const canvas = chartContainer.querySelector(`#${chartId}`) as HTMLCanvasElement;
-  if (!canvas) return;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) return;
+  // The _createChartCanvasAndContext was missing in the previous version of this function in the prompt.
+  // It was added in the previous step, so I'm assuming it's there.
+  // If not, this would need to be:
+  const setup = _createChartCanvasAndContext(
+    chartId,
+    Constants.CHART_DEFAULT_WORD_FREQ_TITLE,
+    Constants.CHART_DEFAULT_WORD_FREQ_DESCRIPTION,
+    aiChartDisplayArea
+  );
+
+  if (!setup || !setup.ctx) {
+    if (showToast) showToast({ type: 'error', title: 'Chart Setup Error', message: 'Could not create word frequency chart canvas.' });
+    return;
+  }
+  const { ctx } = setup;
 
   const sortedWords = Object.entries(wordData).sort(([,a], [,b]) => b - a).slice(0, 10);
   const labels = sortedWords.map(([word]) => word);
   const data = sortedWords.map(([,count]) => count);
 
-  const chart = new Chart(ctx, {
+  try {
+    const chart = new Chart(ctx, {
     type: 'bar',
     data: {
       labels: labels,
@@ -341,7 +382,13 @@ export async function createWordFrequencyChart(
       scales: { x: { beginAtZero: true } }
     }
   });
-  activeAiChartInstances.push(chart);
+    activeAiChartInstances.push(chart);
+  } catch (error) {
+    console.error('Error creating Word Frequency Chart:', error);
+    if (showToast) {
+        showToast({ type: 'error', title: 'Chart Error', message: 'Could not create word frequency chart.' });
+    }
+  }
 }
 
 export async function generateSampleCharts(

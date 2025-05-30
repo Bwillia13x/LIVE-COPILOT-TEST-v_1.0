@@ -72,9 +72,16 @@ export async function callGeminiForPolishing(genAI: GoogleGenAI, text: string): 
         chartSuggestion: null
       };
     }
-  } catch (error) {
-    console.error('❌ Gemini API call failed:', error);
-    throw error;
+  } catch (error: any) {
+    console.error("❌ Gemini callGeminiForPolishing failed:", error);
+    let errorType = 'API_ERROR';
+    if (error.message && typeof error.message === 'string' && error.message.toLowerCase().includes('network')) {
+      errorType = 'NETWORK_ERROR';
+    } else if (error.message && typeof error.message === 'string' && error.message.toLowerCase().includes('timeout')) {
+      errorType = 'TIMEOUT_ERROR';
+    }
+    // Re-throw a new error with a more descriptive message and type
+    throw new Error(`[${errorType}] callGeminiForPolishing failed: ${error.message}`);
   }
 }
 
@@ -125,9 +132,16 @@ export async function callGeminiForInsights(genAI: GoogleGenAI, text: string): P
     } else {
       console.log('❌ No JSON found in insights response');
     }
-  } catch (error) {
-    console.error('❌ Gemini insights call failed:', error);
-    throw error;
+  } catch (error: any) {
+    console.error("❌ Gemini callGeminiForInsights failed:", error);
+    let errorType = 'API_ERROR';
+    if (error.message && typeof error.message === 'string' && error.message.toLowerCase().includes('network')) {
+      errorType = 'NETWORK_ERROR';
+    } else if (error.message && typeof error.message === 'string' && error.message.toLowerCase().includes('timeout')) {
+      errorType = 'TIMEOUT_ERROR';
+    }
+    // Re-throw a new error with a more descriptive message and type
+    throw new Error(`[${errorType}] callGeminiForInsights failed: ${error.message}`);
   }
   
   return null;
